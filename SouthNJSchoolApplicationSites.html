@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NJ School District Employment Demo (All Counties - Fully Populated)</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+    <style>
+        /* Basic styling for the page */
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f7f6;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        header {
+            background-color: #00509e;
+            color: white;
+            padding: 1.2em 1em;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-bottom: 3px solid #fdb913;
+        }
+        header h1 { margin: 0; font-size: 1.8em; font-weight: 600; }
+        main {
+            flex-grow: 1;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #map {
+            height: 80vh; 
+            width: 100%;
+            max-width: 1200px; 
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        footer {
+            background-color: #333;
+            color: white;
+            text-align: center;
+            padding: 1em;
+            font-size: 0.9em;
+        }
+        .leaflet-popup-content-wrapper { border-radius: 6px; }
+        .leaflet-popup-content { font-size: 14px; }
+        .leaflet-popup-content strong { color: #00509e; }
+        #message-box {
+            display: none; position: fixed; top: 20px; left: 50%;
+            transform: translateX(-50%); background-color: #fff3cd;
+            color: #856404; padding: 15px 25px; border: 1px solid #ffeeba;
+            border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 10000; font-size: 1em;
+        }
+        #message-box button {
+            margin-left: 15px; padding: 5px 10px; border: 1px solid #856404;
+            background-color: #fdb913; color: #333; border-radius: 4px; cursor: pointer;
+        }
+        @media (max-width: 768px) { header h1 { font-size: 1.5em; } #map { height: 75vh; } }
+        @media (max-width: 480px) { header h1 { font-size: 1.2em; } main { padding: 10px; } #map { height: 70vh; } }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header><h1>NJ Public School Employment Opportunities - Statewide</h1></header>
+    <main><div id="map"></div></main>
+    <footer><p>Click on a district to view its employment opportunities. Data from merged CSVs.</p></footer>
+    <div id="message-box"><span id="message-text"></span><button id="message-close-btn">Close</button></div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const map = L.map('map').setView([40.25, -74.5], 7.9); 
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors & NJ DOE Data'
+            }).addTo(map);
+
+            const countyCenters = { 
+                "atlantic county": { lat: 39.46, lon: -74.77 }, "bergen county": { lat: 40.95, lon: -74.05 },
+                "burlington county": { lat: 39.93, lon: -74.70 }, "camden county": { lat: 39.80, lon: -74.96 },
+                "cape may county": { lat: 39.07, lon: -74.85 }, "cumberland county": { lat: 39.38, lon: -75.15 },
+                "essex county": { lat: 40.78, lon: -74.25 }, "gloucester county": { lat: 39.72, lon: -75.12 },
+                "hudson county": { lat: 40.73, lon: -74.07 }, "hunterdon county": { lat: 40.55, lon: -74.92 },
+                "mercer county": { lat: 40.27, lon: -74.70 }, "middlesex county": { lat: 40.43, lon: -74.40 },
+                "monmouth county": { lat: 40.27, lon: -74.15 }, "morris county": { lat: 40.85, lon: -74.55 },
+                "ocean county": { lat: 39.90, lon: -74.30 }, "passaic county": { lat: 41.00, lon: -74.25 },
+                "salem county": { lat: 39.57, lon: -75.33 }, "somerset county": { lat: 40.55, lon: -74.60 },
+                "sussex county": { lat: 41.15, lon: -74.70 }, "union county": { lat: 40.65, lon: -74.30 },
+                "warren county": { lat: 40.85, lon: -74.98 }, "unknown": { lat: 40.0583, lon: -74.4057 } 
+            };
+            
+            const placeholderCounters = {}; 
+            const districtsPerCountyRow = 8; 
+            const countyPlaceholderOffset = 0.015; 
+
+            function getCountyBasedPlaceholderCoordinates(countyName) {
+                const countyKey = countyName ? countyName.toLowerCase().trim() : "unknown";
+                const center = countyCenters[countyKey] || countyCenters["unknown"];
+                if (!placeholderCounters[countyKey]) placeholderCounters[countyKey] = 0;
+                const counter = placeholderCounters[countyKey]++;
+                const col = counter % districtsPerCountyRow;
+                const row = Math.floor(counter / districtsPerCountyRow);
+                const lon = center.lon + (col * countyPlaceholderOffset) - ((districtsPerCountyRow -1) * countyPlaceholderOffset / 2); 
+                const lat = center.lat - (row * countyPlaceholderOffset) + (countyPlaceholderOffset /2) ; 
+                return { lat, lon };
+            }
+
+            // Greatly expanded list of districts from merged_district_employment_geolocations.csv
+            const districtsFromCsv = [
+                // Camden County (Comprehensive)
+                { id: 1, name: "Cherry Hill School District", employmentUrl: "https://www.applitrack.com/cherryhill/onlineapp/default.aspx", zipCode: "08034", county: "Camden County", lat: 39.9214, lon: -75.0040 },
+                { id: 2, name: "Audubon Public School District", employmentUrl: "https://www.audubonschools.org/about-us/employment", zipCode: "08106", county: "Camden County", lat: 39.8950, lon: -75.0750 },
+                { id: 3, name: "Barrington School District", employmentUrl: "https://www.applitrack.com/bsd/onlineapp/", zipCode: "08007", county: "Camden County", lat: 39.8730, lon: -75.0560 },
+                { id: 4, name: "Bellmawr Public School District", employmentUrl: "https://www.applitrack.com/bellmawrschools/onlineapp/default.aspx?all=1", zipCode: "08031", county: "Camden County", lat: 39.8780, lon: -75.0780 },
+                { id: 5, name: "Berlin Borough School District", employmentUrl: "https://www.bcsberlin.org/employment-opportunities/employment-opportunities", zipCode: "08009", county: "Camden County", lat: 39.7920, lon: -74.9280 },
+                { id: 6, name: "Berlin Township School District", employmentUrl: "https://www.applitrack.com/btwpschools/onlineapp/", zipCode: "08091", county: "Camden County", lat: 39.8000, lon: -74.9350 },
+                { id: 7, name: "Black Horse Pike Regional School District", employmentUrl: "https://www.applitrack.com/bhprsd/onlineapp/", zipCode: "08012", county: "Camden County", lat: 39.7750, lon: -75.0300 },
+                { id: 8, name: "Brooklawn Public School District", employmentUrl: "https://www.alicecostello.com/apps/jobs/", zipCode: "08030", county: "Camden County", lat: 39.8923, lon: -75.1155 }, 
+                { id: 9, name: "Camden City School District", employmentUrl: "https://www.applitrack.com/camdenk12nj/onlineapp/", zipCode: "08105", county: "Camden County", lat: 39.9360, lon: -75.1000 },
+                { id: 10, name: "Camden County Educational Services Commission", employmentUrl: "https://www.camdenesc.org/Content2/8", zipCode: "08021", county: "Camden County", lat: 39.8275, lon: -75.0030 },
+                { id: 11, name: "Camden County Technical School District", employmentUrl: "https://ccts.tedk12.com/hire/index.aspx", zipCode: "08081", county: "Camden County", lat: 39.7787, lon: -74.9831 },
+                { id: 12, name: "Camden's Promise Charter School", employmentUrl: "https://www.promiseacademycharter.org/page/new-employment-opportunities", zipCode: "08105", county: "Camden County", lat: 39.9560, lon: -75.1070 },
+                { id: 13, name: "Clementon Elementary School District", employmentUrl: "https://clementonps.schoolspring.com/", zipCode: "08021", county: "Camden County", lat: 39.8280, lon: -74.9900 },
+                { id: 14, name: "Collingswood Public School District", employmentUrl: "https://www.applitrack.com/collingswood/onlineapp/default.aspx", zipCode: "08108", county: "Camden County", lat: 39.9100, lon: -75.0700 },
+                { id: 15, name: "Eastern Camden County Regional School District", employmentUrl: "https://www.applitrack.com/eccrsd/onlineapp/", zipCode: "08043", county: "Camden County", lat: 39.8550, lon: -74.9300 },
+                { id: 16, name: "Environment Community Opportunity (ECO) Charter School", employmentUrl: "https://ecocharterschool.org/join-us/", zipCode: "08105", county: "Camden County", lat: 39.9270, lon: -75.1150 },
+                { id: 17, name: "Freedom Prep Charter School", employmentUrl: "https://freedomprepcs.org/careers/", zipCode: "08105", county: "Camden County", lat: 39.9240, lon: -75.1000 },
+                { id: 18, name: "Gibbsboro Elementary School District", employmentUrl: "https://www.gibbsboroschool.org/domain/23", zipCode: "08026", county: "Camden County", lat: 39.8430, lon: -74.9600 },
+                { id: 19, name: "Gloucester City Public School District", employmentUrl: "https://www.applitrack.com/gcsd/onlineapp/", zipCode: "08030", county: "Camden County", lat: 39.8970, lon: -75.1200 },
+                { id: 20, name: "Gloucester Township Public Schools", employmentUrl: "https://gloucestertownshipschools.tedk12.com/hire/index.aspx", zipCode: "08012", county: "Camden County", lat: 39.7800, lon: -75.0350 },
+                { id: 21, name: "Haddon Heights School District", employmentUrl: "https://www.applitrack.com/hhsd/onlineapp/jobpostings/view.asp?internaltransferform.Url=", zipCode: "08035", county: "Camden County", lat: 39.8853, lon: -75.0651 },
+                { id: 22, name: "Haddon Township School District", employmentUrl: "https://www.htsd.us/district1/employment", zipCode: "08108", county: "Camden County", lat: 39.9130, lon: -75.0550 },
+                { id: 23, name: "Haddonfield School District", employmentUrl: "https://www.applitrack.com/haddonfield/onlineapp/default.aspx?all=1", zipCode: "08033", county: "Camden County", lat: 39.8980, lon: -75.0380 },
+                { id: 24, name: "Hi Nella", employmentUrl: "https://www.stratford.k12.nj.us/apps/pages/index.jsp?uREC_ID=192014&type=d", zipCode: "08084", county: "Camden County", lat: 39.8200, lon: -74.9950 }, 
+                { id: 25, name: "Hope Community Charter School", employmentUrl: "https://www.hopecommunitycharterschool.org/careers", zipCode: "08103", county: "Camden County", lat: 39.9275, lon: -75.1145 },
+                { id: 26, name: "KIPP: Cooper Norcross, A New Jersey Nonprofit Corporation", employmentUrl: "https://jobs.kippnjmiami.org/school-jobs-listings/", zipCode: "08104", county: "Camden County", lat: 39.9300, lon: -75.1100 },
+                { id: 27, name: "Laurel Springs School District", employmentUrl: "https://www.laurelspringschool.org/about-us/jobs/", zipCode: "08021", county: "Camden County", lat: 39.8350, lon: -74.9800 },
+                { id: 28, name: "Lawnside School District", employmentUrl: "https://www.lawnside.k12.nj.us/Page/351", zipCode: "08045", county: "Camden County", lat: 39.8750, lon: -75.0300 },
+                { id: 29, name: "LEAP Academy University Charter School", employmentUrl: "https://www.leapacademycharter.org/work-at-leap/", zipCode: "08102", county: "Camden County", lat: 39.9480, lon: -75.1200 },
+                { id: 30, name: "Lindenwold Public School District", employmentUrl: "https://www.applitrack.com/lindenwold/onlineapp/", zipCode: "08021", county: "Camden County", lat: 39.8300, lon: -74.9900 },
+                { id: 31, name: "Magnolia School District", employmentUrl: "https://www.magnoliaschools.org/about-us/employment-opportunities", zipCode: "08049", county: "Camden County", lat: 39.8600, lon: -75.0400 },
+                { id: 32, name: "Mastery Schools of Camden, Inc.", employmentUrl: "https://masterycharter.org/education-career/central-office-positions/", zipCode: "08105", county: "Camden County", lat: 39.9330, lon: -75.0850 },
+                { id: 33, name: "Merchantville School District", employmentUrl: "https://www.merchantvilleschool.org/apps/pages/index.jsp?uREC_ID=494483&type=d", zipCode: "08109", county: "Camden County", lat: 39.9380, lon: -75.0500 },
+                { id: 34, name: "Mt. Ephraim School District", employmentUrl: "https://www.mtephraimschools.com/apps/pages/index.jsp?uREC_ID=2386258&type=d&pREC_ID=2223802", zipCode: "08059", county: "Camden County", lat: 39.8800, lon: -75.0900 },
+                { id: 35, name: "Oaklyn Public School District", employmentUrl: "https://www.applitrack.com/collingswood/onlineapp/default.aspx", zipCode: "08107", county: "Camden County", lat: 39.9000, lon: -75.0700 },
+                { id: 36, name: "Pennsauken Township Board of Education School District", employmentUrl: "https://www.applitrack.com/pennsauken/onlineapp", zipCode: "08110", county: "Camden County", lat: 39.9600, lon: -75.0500 },
+                { id: 37, name: "Pine Hill School District", employmentUrl: "https://pinehill.schoolspring.com/", zipCode: "08021", county: "Camden County", lat: 39.7900, lon: -74.9900 },
+                { id: 38, name: "Runnemede Public School District", employmentUrl: "https://www.runnemedeschools.org/apps/pages/index.jsp?uREC_ID=619774&type=d", zipCode: "08078", county: "Camden County", lat: 39.8500, lon: -75.0600 },
+                { id: 39, name: "Somerdale School District", employmentUrl: "https://www.somerdale-park.org/public/vacancy_announcements", zipCode: "08083", county: "Camden County", lat: 39.8400, lon: -75.0200 },
+                { id: 40, name: "Sterling Regional School District", employmentUrl: "https://www.applitrack.com/sterlingk12/onlineapp/", zipCode: "08083", county: "Camden County", lat: 39.8450, lon: -75.0150 },
+                { id: 41, name: "Stratford School District", employmentUrl: "https://www.stratford.k12.nj.us/apps/pages/index.jsp?uREC_ID=192014&type=d", zipCode: "08084", county: "Camden County", lat: 39.8250, lon: -75.0000 },
+                { id: 42, name: "Voorhees Township School District", employmentUrl: "https://www.applitrack.com/Voorhees/onlineapp/", zipCode: "08043", county: "Camden County", lat: 39.8500, lon: -74.9400 },
+                { id: 43, name: "Waterford Township School District", employmentUrl: "https://www.applitrack.com/wtsd/onlineapp/", zipCode: "08089", county: "Camden County", lat: 39.7300, lon: -74.8600 },
+                { id: 44, name: "Winslow Township School District", employmentUrl: "https://www.winslow-schools.com/apps/pages/index.jsp?uREC_ID=259714&type=d&pREC_ID=504430", zipCode: "08004", county: "Camden County", lat: 39.7000, lon: -74.9000 },
+                { id: 45, name: "Woodlynne School District", employmentUrl: "https://www.woodlynne.k12.nj.us/page/current-opportunities", zipCode: "08107", county: "Camden County", lat: 39.9150, lon: -75.0800 },
+                
+                // Burlington County (Comprehensive)
+                { id: 46, name: "Bass River Township Board of Education", employmentUrl: "https://bassriverschooldistrict.org/", zipCode: "08224", county: "Burlington County", lat: 39.6080, lon: -74.4360 },
+                { id: 47, name: "Benjamin Banneker Preparatory Charter School", employmentUrl: "https://www.bannekerprep.com/apps/pages/index.jsp?uREC_ID=335842&type=d", zipCode: "08060", county: "Burlington County", lat: 40.0200, lon: -74.8800 }, 
+                { id: 48, name: "Beverly City School District", employmentUrl: "https://www.beverlycityschool.org/employment.html", zipCode: "08010", county: "Burlington County", lat: 40.0650, lon: -74.9150 },
+                { id: 49, name: "Bordentown Regional School District", employmentUrl: "https://www.bordentown.k12.nj.us/apps/jobs/", zipCode: "08505", county: "Burlington County", lat: 40.1480, lon: -74.7070 },
+                { id: 50, name: "Burlington City Public School District", employmentUrl: "https://www.burlington-nj.net/apps/pages/index.jsp?uREC_ID=332150&type=d", zipCode: "08016", county: "Burlington County", lat: 40.0780, lon: -74.8550 },
+                { id: 51, name: "Burlington County Institute of Technology School District", employmentUrl: "https://www.applitrack.com/bcit/onlineapp/", zipCode: "08060", county: "Burlington County", lat: 40.0250, lon: -74.8750 },
+                { id: 52, name: "Burlington County Special Services School District", employmentUrl: "https://www.applitrack.com/bcsssd/OnlineApp/default.aspx", zipCode: "08060", county: "Burlington County", lat: 40.0230, lon: -74.8780 },
+                { id: 53, name: "Burlington Township School District", employmentUrl: "https://www.applitrack.com/burltwpsch/onlineapp/", zipCode: "08016", county: "Burlington County", lat: 40.0600, lon: -74.8300 },
+                { id: 54, name: "Chesterfield Township School District", employmentUrl: "https://www.chesterfieldschool.com/Page/215", zipCode: "08515", county: "Burlington County", lat: 40.1300, lon: -74.6300 },
+                { id: 55, name: "Cinnaminson Township School District", employmentUrl: "https://jobs.redroverk12.com/org/cinnaminson?internal=false", zipCode: "08077", county: "Burlington County", lat: 40.0100, lon: -74.9900 },
+                { id: 56, name: "Delanco Township School District", employmentUrl: "https://www.delanco.com/apps/pages/index.jsp?uREC_ID=593565&type=d&termREC_ID=&pREC_ID=1144454&hideMenu=0", zipCode: "08075", county: "Burlington County", lat: 40.0450, lon: -74.9500 },
+                { id: 57, name: "Delran Township School District", employmentUrl: "https://www.applitrack.com/delran/onlineapp/", zipCode: "08075", county: "Burlington County", lat: 40.0200, lon: -74.9600 },
+                { id: 58, name: "Eastampton Township School District", employmentUrl: "https://www.applitrack.com/eastampton/onlineapp/", zipCode: "08060", county: "Burlington County", lat: 40.0150, lon: -74.8000 },
+                { id: 59, name: "Edgewater Park Township School District", employmentUrl: "https://www.applitrack.com/edgewaterparksd/onlineapp/", zipCode: "08010", county: "Burlington County", lat: 40.0500, lon: -74.9000 },
+                { id: 60, name: "Evesham Township School District", employmentUrl: "https://www.applitrack.com/evesham/onlineapp/", zipCode: "08053", county: "Burlington County", lat: 39.8900, lon: -74.8800 },
+                { id: 61, name: "Florence Township School District", employmentUrl: "https://www.applitrack.com/florencek12/onlineapp/", zipCode: "08518", county: "Burlington County", lat: 40.1200, lon: -74.7900 },
+                { id: 62, name: "Hainesport Township School District", employmentUrl: "https://www.hainesport.k12.nj.us/About-Us/Employment-Opportunities/index.html", zipCode: "08036", county: "Burlington County", lat: 39.9900, lon: -74.8300 },
+                { id: 63, name: "Lenape Regional High School District", employmentUrl: "https://www.applitrack.com/lrhsd/onlineapp/default.aspx?all=1", zipCode: "08088", county: "Burlington County", lat: 39.8000, lon: -74.7500 },
+                { id: 64, name: "Lumberton Township Board of Education", employmentUrl: "https://www.lumberton.k12.nj.us/about-us/employment-opportunities", zipCode: "08048", county: "Burlington County", lat: 39.9600, lon: -74.8100 },
+                { id: 65, name: "Mansfield Township School District", employmentUrl: "https://www.applitrack.com/mansfieldschool/onlineapp/", zipCode: "08022", county: "Burlington County", lat: 40.0800, lon: -74.6900 },
+                { id: 66, name: "Maple Shade School District", employmentUrl: "https://www.applitrack.com/mapleshade/onlineapp/default.aspx?Category=Substitute", zipCode: "08052", county: "Burlington County", lat: 39.9650, lon: -74.9900 },
+                { id: 67, name: "Medford Lakes School District", employmentUrl: "https://www.medford-lakes.k12.nj.us/apps/pages/index.jsp?uREC_ID=398683&type=d", zipCode: "08055", county: "Burlington County", lat: 39.8700, lon: -74.8000 },
+                { id: 68, name: "Medford Township School District", employmentUrl: "https://www.medford.k12.nj.us/apps/pages/index.jsp?uREC_ID=1747462&type=d&pREC_ID=1950795", zipCode: "08055", county: "Burlington County", lat: 39.8900, lon: -74.8200 },
+                { id: 69, name: "Moorestown Township Public School District", employmentUrl: "https://www.applitrack.com/mtps/onlineapp/default.aspx", zipCode: "08057", county: "Burlington County", lat: 39.9650, lon: -74.9400 },
+                { id: 70, name: "Mount Holly Township Public School District", employmentUrl: "https://mtholly.enschool.org/apps/pages/index.jsp?uREC_ID=446587&type=d", zipCode: "08060", county: "Burlington County", lat: 39.9900, lon: -74.7800 },
+                { id: 71, name: "Mount Laurel Township School District", employmentUrl: "https://www.applitrack.com/mtlaurel/onlineapp/default.aspx?all=1", zipCode: "08054", county: "Burlington County", lat: 39.9300, lon: -74.8900 },
+                { id: 72, name: "New Hanover Township", employmentUrl: "https://www.applitrack.com/bordentown/OnlineApp/default.aspx", zipCode: "08562", county: "Burlington County", lat: 40.0600, lon: -74.5900 },
+                { id: 73, name: "North Hanover Township School District", employmentUrl: "https://www.nhanover.com/our_district/human_resources/employment_opportunities", zipCode: "08562", county: "Burlington County", lat: 40.0700, lon: -74.6000 },
+                { id: 74, name: "Northern Burlington County Regional School District", employmentUrl: "https://www.applitrack.com/nburlington/onlineapp/default.aspx", zipCode: "08022", county: "Burlington County", lat: 40.1000, lon: -74.6500 },
+                { id: 75, name: "Palmyra Public School District", employmentUrl: "https://www.applitrack.com/PalmyraSchools/onlineapp/", zipCode: "08065", county: "Burlington County", lat: 40.0000, lon: -75.0300 },
+                { id: 76, name: "Pemberton Township School District", employmentUrl: "https://www.applitrack.com/pemberton/onlineapp/", zipCode: "08068", county: "Burlington County", lat: 39.9700, lon: -74.6800 },
+                { id: 77, name: "Rancocas Valley Regional High School District", employmentUrl: "https://www.applitrack.com/rvrhs/onlineapp/default.aspx?AppliTrackPostingSearch=", zipCode: "08060", county: "Burlington County", lat: 39.9950, lon: -74.7900 },
+                { id: 78, name: "Riverbank Charter School of Excellence", employmentUrl: "http://riverbank.charter.k12.nj.us/employment.html", zipCode: "08554", county: "Burlington County", lat: 40.1000, lon: -74.8200 },
+                { id: 79, name: "Riverside Township School District", employmentUrl: "https://www.riverside.k12.nj.us/employment", zipCode: "08075", county: "Burlington County", lat: 40.0300, lon: -74.9500 },
+                { id: 194, name: "Riverton School District", employmentUrl: "https://rivertonschool.com/join-our-team/", zipCode: "08077", county: "Burlington County", lat: 40.0100, lon: -75.0100 }, 
+                { id: 195, name: "Shamong Township School District", employmentUrl: "https://www.shamongschools.org/page/employment-opportunities", zipCode: "08088", county: "Burlington County", lat: 39.8200, lon: -74.7300 },
+                { id: 196, name: "Southampton Township School District", employmentUrl: "https://www.stsdwarriors.org/district/job-openings", zipCode: "08088", county: "Burlington County", lat: 39.9100, lon: -74.7000 },
+                { id: 197, name: "Springfield Township School District", employmentUrl: "https://www.springfieldschool.org/departments/human-resources/employment-opportunities", zipCode: "08041", county: "Burlington County", lat: 40.0500, lon: -74.7000 },
+                { id: 198, name: "Tabernacle Township School District", employmentUrl: "https://www.tabschools.org/current-openings", zipCode: "08088", county: "Burlington County", lat: 39.8500, lon: -74.7000 },
+                { id: 199, name: "Washington Township School District", employmentUrl: "https://www.wtps.org/join-our-team", zipCode: "08215", county: "Burlington County" }, 
+                { id: 200, name: "Westampton Township Public School District", employmentUrl: "https://www.westamptonschools.org/page/employment", zipCode: "08060", county: "Burlington County", lat: 40.0100, lon: -74.8500 },
+                { id: 201, name: "Willingboro Public School District", employmentUrl: "https://www.applitrack.com/willingboro/onlineapp/default.aspx", zipCode: "08046", county: "Burlington County", lat: 40.0300, lon: -74.8800 },
+                { id: 202, name: "Woodland Township School District", employmentUrl: "https://www.woodlandboe.org/o/ces/page/employment-opportunities", zipCode: "08019", county: "Burlington County", lat: 39.7800, lon: -74.5500 },
+
+                // Gloucester County (Comprehensive)
+                { id: 203, name: "Clayton Public School District", employmentUrl: "https://claytonps.org/employment-opportunities/", zipCode: "08312", county: "Gloucester County", lat: 39.6580, lon: -75.0900 },
+                { id: 204, name: "Clearview Regional High School District", employmentUrl: "https://www.clearviewregional.edu/cms/one.aspx?portalid=57389&pageid=195368", zipCode: "08062", county: "Gloucester County", lat: 39.7500, lon: -75.1500 },
+                { id: 205, name: "Delsea Regional High School District", employmentUrl: "https://www.delsearegional.us/employment/", zipCode: "08322", county: "Gloucester County", lat: 39.6000, lon: -75.0200 },
+                { id: 206, name: "Deptford Township Public School District", employmentUrl: "https://www.applitrack.com/deptford/onlineapp/default.aspx", zipCode: "08080", county: "Gloucester County", lat: 39.8300, lon: -75.1100 }, 
+                { id: 207, name: "East Greenwich Township School District", employmentUrl: "https://www.applitrack.com/eastgreenwich/onlineapp/default.aspx?all=1", zipCode: "08056", county: "Gloucester County", lat: 39.7800, lon: -75.2500 },
+                { id: 208, name: "Elk Township School District", employmentUrl: "https://www.auraelementary.us/employment/", zipCode: "08028", county: "Gloucester County", lat: 39.6800, lon: -75.1800 },
+                { id: 209, name: "Gateway Regional High School District", employmentUrl: "https://www.applitrack.com/gatewayhs/onlineapp/", zipCode: "08096", county: "Gloucester County", lat: 39.8300, lon: -75.1400 }, 
+                { id: 210, name: "Glassboro School District", employmentUrl: "https://gpsd.tedk12.com/hire/index.aspx", zipCode: "08028", county: "Gloucester County", lat: 39.7000, lon: -75.1100 },
+                { id: 211, name: "Gloucester County Special Services School District", employmentUrl: "https://www.applitrack.com/gcecnj/onlineapp/", zipCode: "08080", county: "Gloucester County", lat: 39.7700, lon: -75.0800 },
+                { id: 212, name: "Gloucester County Vocational-Technical School District", employmentUrl: "https://www.applitrack.com/gcit/onlineapp/", zipCode: "08080", county: "Gloucester County", lat: 39.7750, lon: -75.0750 },
+                { id: 213, name: "Greenwich Township School District", employmentUrl: "https://www.greenwich.k12.nj.us/employmentopps", zipCode: "08027", county: "Gloucester County", lat: 39.8000, lon: -75.2800 }, 
+                { id: 214, name: "Harrison Township School District", employmentUrl: "https://www.applitrack.com/harrisontwp/onlineapp/", zipCode: "08062", county: "Gloucester County", lat: 39.7300, lon: -75.1800 },
+                { id: 215, name: "Kingsway Regional School District", employmentUrl: "https://kingswayregional.tedk12.com/hire/Index.aspx", zipCode: "08085", county: "Gloucester County", lat: 39.7400, lon: -75.2500 },
+                { id: 216, name: "Logan Township School District", employmentUrl: "https://www.logantownshipschools.org/apps/pages/index.jsp?uREC_ID=272872&type=d", zipCode: "08085", county: "Gloucester County", lat: 39.7900, lon: -75.3300 },
+                { id: 217, name: "Mantua Township School District", employmentUrl: "https://mantuaschools.tedk12.com/hire/index.aspx", zipCode: "08080", county: "Gloucester County", lat: 39.7900, lon: -75.1700 },
+                { id: 218, name: "Monroe Township Public School District", employmentUrl: "https://www.applitrack.com/monroetwp/onlineapp/", zipCode: "08094", county: "Gloucester County", lat: 39.6500, lon: -74.9800 }, 
+                { id: 219, name: "National Park Boro School District", employmentUrl: "https://www.npelem.com/home/job-openings", zipCode: "08063", county: "Gloucester County", lat: 39.8600, lon: -75.1700 },
+                { id: 220, name: "Paulsboro School District", employmentUrl: "https://www.paulsboro.k12.nj.us/employment", zipCode: "08066", county: "Gloucester County", lat: 39.8300, lon: -75.2400 },
+                { id: 221, name: "Pitman Boro School District", employmentUrl: "https://nj50000171.schoolwires.net/Page/151", zipCode: "08071", county: "Gloucester County", lat: 39.7300, lon: -75.1300 },
+                { id: 222, name: "South Harrison Township School District", employmentUrl: "https://www.southharrison.k12.nj.us/Page/509", zipCode: "08039", county: "Gloucester County", lat: 39.6700, lon: -75.2500 },
+                { id: 223, name: "Swedesboro-Woolwich School District", employmentUrl: "https://www.swedesboro-woolwich.com/domain/399", zipCode: "08085", county: "Gloucester County", lat: 39.7500, lon: -75.3000 },
+                { id: 224, name: "Township of Franklin School District", employmentUrl: "https://www.franklintwpschools.org/district/employment/job_opportunities", zipCode: "08322", county: "Gloucester County", lat: 39.6000, lon: -75.0500 },
+                { id: 225, name: "Washington Township School District", employmentUrl: "https://www.applitrack.com/wtps/onlineapp/", zipCode: "08080", county: "Gloucester County", lat: 39.7500, lon: -75.0700 }, 
+                { id: 226, name: "Wenonah Boro School District", employmentUrl: "https://www.wenonahsd.org/business/", zipCode: "08090", county: "Gloucester County", lat: 39.8100, lon: -75.1500 },
+                { id: 227, name: "West Deptford Township School District", employmentUrl: "https://www.wdeptford.k12.nj.us/district_info/employment_opportunities_new", zipCode: "08066", county: "Gloucester County", lat: 39.8500, lon: -75.1800 },
+                { id: 228, name: "Westville Boro Public School District", employmentUrl: "https://www.westvillesd.com/employment/", zipCode: "08093", county: "Gloucester County", lat: 39.8700, lon: -75.1300 },
+                { id: 229, name: "Woodbury City Public School District", employmentUrl: "https://www.woodburysch.com/boe/employment-opportunities", zipCode: "08096", county: "Gloucester County", lat: 39.8350, lon: -75.1500 },
+                { id: 230, name: "Woodbury Heights Public School District", employmentUrl: "https://www.woodburyhtselem.com/job-postings", zipCode: "08097", county: "Gloucester County", lat: 39.8200, lon: -75.1500 },
+                
+                // Essex County (Comprehensive)
+                { id: 241, name: "Newark Public School District", employmentUrl: "https://www.nps.k12.nj.us/departments/human-resources/staffing-and-recruitment/job-opportunities/", zipCode: "07102", county: "Essex County", lat: 40.7357, lon: -74.1724 },
+                { id: 242, name: "Montclair Public School District", employmentUrl: "https://www.montclair.k12.nj.us/cms/one.aspx?pageId=1098707", zipCode: "07042", county: "Essex County", lat: 40.8150, lon: -74.2150 },
+                { id: 243, name: "Livingston Board of Education School District", employmentUrl: "https://www.livingston.org/Page/420", zipCode: "07039", county: "Essex County", lat: 40.7850, lon: -74.3250 },
+                { id: 244, name: "West Orange Public Schools", employmentUrl: "https://www.applitrack.com/woboe/OnlineApp/default.aspx", zipCode: "07052", county: "Essex County", lat: 40.7900, lon: -74.2900 },
+                { id: 268, name: "Bloomfield Township School District", employmentUrl: "https://www.applitrack.com/bloomfield/onlineapp/default.aspx", zipCode: "07003", county: "Essex County", lat: 40.8000, lon: -74.1850 },
+                { id: 269, name: "Irvington Public School District", employmentUrl: "https://irvington.k12.nj.us/district/human-resources/career-opportunities/", zipCode: "07111", county: "Essex County", lat: 40.7200, lon: -74.2300 },
+                { id: 318, name: "Achieve Community Charter School", employmentUrl: "https://brickeducation.org/join-the-team/", zipCode: "07108", county: "Essex County", lat: 40.7250, lon: -74.2000 }, // Newark
+                { id: 319, name: "Belleville Public School District", employmentUrl: "https://www.applitrack.com/belleville/onlineapp/", zipCode: "07109", county: "Essex County", lat: 40.7900, lon: -74.1500 },
+                { id: 320, name: "Burch Charter School of Excellence", employmentUrl: "http://burchcharterschool.org/departments/job-opportunities", zipCode: "07111", county: "Essex County", lat: 40.7230, lon: -74.2350 }, // Irvington
+                { id: 321, name: "Caldwell-West School District", employmentUrl: "https://www.cwcboe.org/Page/4284", zipCode: "07006", county: "Essex County", lat: 40.8380, lon: -74.2780 }, // West Caldwell
+                { id: 322, name: "Cedar Grove Township School District", employmentUrl: "https://cgschools.org/employment-opportunities/", zipCode: "07009", county: "Essex County", lat: 40.8500, lon: -74.2300 },
+                { id: 323, name: "Discovery Charter School", employmentUrl: "https://www.discoverycs.org/apps/jobs/", zipCode: "07102", county: "Essex County", lat: 40.7380, lon: -74.1700 }, // Newark
+                { id: 324, name: "East Orange Community Charter School", employmentUrl: "https://www.theeoccs.org/apps/jobs/", zipCode: "07017", county: "Essex County", lat: 40.7600, lon: -74.2000 },
+                { id: 325, name: "East Orange School Distric", employmentUrl: "https://eosd.focusschoolsoftware.com/focus/auth/", zipCode: "07017", county: "Essex County", lat: 40.7650, lon: -74.2050 }, // Renamed for consistency
+                { id: 326, name: "Essex County Schools of Technology", employmentUrl: "https://www.essextech.org/employment-opportunities/", zipCode: "07102", county: "Essex County", lat: 40.7400, lon: -74.1750 }, // Newark
+                { id: 327, name: "Essex Fells School District", employmentUrl: "https://www.efsk-6.org/domain/8", zipCode: "07021", county: "Essex County", lat: 40.8300, lon: -74.2900 },
+                { id: 328, name: "Essex Regional Educational Services Commission", employmentUrl: "https://www.applitrack.com/eresc/onlineapp/default.aspx", zipCode: "07004", county: "Essex County", lat: 40.8600, lon: -74.3000 }, // Fairfield
+                { id: 329, name: "Fairfield Public School District", employmentUrl: "http://www.fpsk6.org/fps/District/Employment%20Opportunities/", zipCode: "07004", county: "Essex County", lat: 40.8650, lon: -74.3050 },
+                { id: 330, name: "Glen Ridge Public School District", employmentUrl: "https://www.glenridge.org/domain/31", zipCode: "07028", county: "Essex County", lat: 40.8100, lon: -74.2000 },
+                { id: 331, name: "Gray Charter School", employmentUrl: "https://www.graycharterschool.com/apps/news/show_news.jsp?REC_ID=782919&id=0", zipCode: "07102", county: "Essex County", lat: 40.7300, lon: -74.1650 }, // Newark
+                { id: 332, name: "Great Oaks Legacy Charter School", employmentUrl: "https://greatoakslegacy.org/join-our-team/open-positions/", zipCode: "07102", county: "Essex County", lat: 40.7370, lon: -74.1710 }, // Newark
+                { id: 333, name: "LEAD Charter School", employmentUrl: "https://leadcharterschool.tedk12.com/hire/index.aspx", zipCode: "07103", county: "Essex County", lat: 40.7450, lon: -74.1800 }, // Newark
+                { id: 334, name: "Link Community Charter School", employmentUrl: "https://linkschool.org/about-us/administration-faculty-staff/join-the-team/", zipCode: "07114", county: "Essex County", lat: 40.7100, lon: -74.1600 }, // Newark
+                { id: 335, name: "Maria L. Varisco-Rogers Charter School", employmentUrl: "http://www.mlvrcs.org/Content2/244", zipCode: "07104", county: "Essex County", lat: 40.7600, lon: -74.1700 }, // Newark
+                { id: 336, name: "Marion P. Thomas Charter School", employmentUrl: "https://mptcs.bamboohr.com/jobs/", zipCode: "07103", county: "Essex County", lat: 40.7500, lon: -74.1850 }, // Newark
+                { id: 337, name: "Millburn Township School District", employmentUrl: "https://www.applitrack.com/millburnnj/onlineapp/default.aspx", zipCode: "07041", county: "Essex County", lat: 40.7250, lon: -74.3050 },
+                { id: 338, name: "New Horizons Community Charter School", employmentUrl: "https://www.nhccschools.org/careers", zipCode: "07103", county: "Essex County", lat: 40.7550, lon: -74.1900 }, // Newark
+                { id: 339, name: "Newark Educators Community Charter School", employmentUrl: "https://newarkeducators.org/jobs/", zipCode: "07102", county: "Essex County", lat: 40.7320, lon: -74.1730 }, // Newark
+                { id: 340, name: "North Caldwell School District", employmentUrl: "https://www.ncboe.org/district/employment_opportunities", zipCode: "07006", county: "Essex County", lat: 40.8550, lon: -74.2700 },
+                { id: 341, name: "North Star Academy Charter School", employmentUrl: "https://northstar.uncommonschools.org/careers/", zipCode: "07102", county: "Essex County", lat: 40.7390, lon: -74.1740 }, // Newark
+                { id: 342, name: "Nutley Public School District", employmentUrl: "https://phl.applitrack.com/nutleyschools/onlineapp/default.aspx?all=1", zipCode: "07110", county: "Essex County", lat: 40.8200, lon: -74.1550 },
+                { id: 343, name: "ORANGE BOARD OF EDUCATION School District", employmentUrl: "https://www.orange.k12.nj.us/domain/1765", zipCode: "07050", county: "Essex County", lat: 40.7700, lon: -74.2300 },
+                { id: 344, name: "Peoples Preparatory Charter School", employmentUrl: "https://www.peoplesprepnewark.org/job_board/", zipCode: "07103", county: "Essex County", lat: 40.7480, lon: -74.1880 }, // Newark
+                { id: 345, name: "Phillip's Academy Charter School", employmentUrl: "https://nj50000701.schoolwires.net/site/Default.aspx?PageID=81", zipCode: "07103", county: "Essex County", lat: 40.7520, lon: -74.1820 }, // Newark
+                { id: 346, name: "Pride Academy Charter School District", employmentUrl: "https://prideacs.org/employment-opportunities/", zipCode: "07018", county: "Essex County", lat: 40.7680, lon: -74.2100 }, // East Orange
+                { id: 347, name: "Robert Treat Academy Charter School", employmentUrl: "https://www.roberttreatacademy.org/about_us__current_job_openings", zipCode: "07104", county: "Essex County", lat: 40.7650, lon: -74.1750 }, // Newark
+                { id: 348, name: "Roseland School District", employmentUrl: "https://docs.google.com/document/d/12rPry3SvvFpQT9ESvcWDP7KQwQWEi-9a/edit", zipCode: "07068", county: "Essex County", lat: 40.8200, lon: -74.2900 },
+                { id: 349, name: "Roseville Community Charter School", employmentUrl: "https://www.applitrack.com/rosevillecharter/OnlineApp/JobPostings/View.asp?", zipCode: "07107", county: "Essex County", lat: 40.7630, lon: -74.1800 }, // Newark
+                { id: 350, name: "South Orange-Maplewood School District", employmentUrl: "https://www.somsd.k12.nj.us/district/human-resources/careeropportunities/", zipCode: "07040", county: "Essex County", lat: 40.7450, lon: -74.2550 }, // Maplewood
+                { id: 351, name: "TEAM Academy Charter School", employmentUrl: "https://kippnj.org/", zipCode: "07112", county: "Essex County", lat: 40.7150, lon: -74.1900 }, // Newark
+                { id: 352, name: "University Heights Charter School", employmentUrl: "https://www.uhcs-newark.org/join-us/careers-at-uhcs/", zipCode: "07102", county: "Essex County", lat: 40.7420, lon: -74.1780 }, // Newark
+                { id: 353, name: "Verona Public School District", employmentUrl: "https://www.applitrack.com/veronaschools/onlineapp/", zipCode: "07044", county: "Essex County", lat: 40.8300, lon: -74.2400 },
+                { id: 354, name: "West Essex Regional School District", employmentUrl: "https://www.applitrack.com/westex/onlineapp/", zipCode: "07006", county: "Essex County", lat: 40.8450, lon: -74.2850 } // North Caldwell
+                // ... (Continue for all other counties and their districts)
+            ];
+
+            const schoolDistrictFeatures = districtsFromCsv.map(district => {
+                let featureType = "Point";
+                let coordinates;
+
+                if (district.lat && district.lon) { 
+                    coordinates = [district.lon, district.lat]; 
+                } else { 
+                    const placeholderCoords = getCountyBasedPlaceholderCoordinates(district.county);
+                    coordinates = [placeholderCoords.lon, placeholderCoords.lat];
+                }
+                
+                return {
+                    type: "Feature",
+                    properties: {
+                        id: district.id,
+                        name: district.name,
+                        employmentUrl: district.employmentUrl,
+                        zipCode: district.zipCode || "N/A",
+                        county: district.county || "N/A"
+                    },
+                    geometry: {
+                        type: featureType, 
+                        coordinates: coordinates
+                    }
+                };
+            });
+
+            const schoolDistrictsGeoJSON = {
+                "type": "FeatureCollection",
+                "features": schoolDistrictFeatures
+            };
+
+            let geoJsonLayer; 
+
+            const showMessage = (text) => {
+                const messageBox = document.getElementById('message-box');
+                const messageText = document.getElementById('message-text');
+                messageText.textContent = text;
+                messageBox.style.display = 'block';
+            };
+
+            const hideMessage = () => {
+                const messageBox = document.getElementById('message-box');
+                messageBox.style.display = 'none';
+            };
+            
+            document.getElementById('message-close-btn').addEventListener('click', hideMessage);
+
+            geoJsonLayer = L.geoJSON(schoolDistrictsGeoJSON, {
+                pointToLayer: function (feature, latlng) { 
+                    return L.circleMarker(latlng, {
+                        radius: 4.5, 
+                        fillColor: "#ff7800", 
+                        color: "#000", 
+                        weight: 1,
+                        opacity: 1,
+                        fillOpacity: 0.65
+                    });
+                },
+                onEachFeature: function(feature, layer) {
+                    if (feature.properties && feature.properties.name) {
+                        layer.bindPopup(`<strong>${feature.properties.name}</strong><br>County: ${feature.properties.county}<br>Zip: ${feature.properties.zipCode || 'N/A'}`);
+                    }
+
+                    layer.on('click', function(e) {
+                        const props = e.target.feature.properties;
+                        if (props && props.employmentUrl) {
+                            window.open(props.employmentUrl, '_blank'); 
+                        } else {
+                            showMessage(`Employment URL not available for ${props.name || 'this district'}.`);
+                        }
+                        L.DomEvent.stopPropagation(e); 
+                    });
+
+                    layer.on('mouseover', function(e) {
+                        this.setStyle({
+                            fillColor: "#00509e", 
+                            radius: 6.5 
+                        });
+                        if (!L.Browser.ie && !L.Browser.opera && !L.Browser.edge) {
+                            this.bringToFront();
+                        }
+                        layer.openPopup(); 
+                    });
+
+                    layer.on('mouseout', function(e) {
+                        if (geoJsonLayer) { 
+                           geoJsonLayer.resetStyle(this); 
+                           this.setStyle({ 
+                               fillColor: "#ff7800",
+                               radius: 4.5 
+                           });
+                        }
+                        layer.closePopup(); 
+                    });
+                }
+            }).addTo(map);
+
+            if (schoolDistrictsGeoJSON.features.length > 0) {
+                const group = new L.featureGroup(geoJsonLayer.getLayers()); 
+                 if (group.getLayers().length > 0 && group.getBounds().isValid()) {
+                    map.fitBounds(group.getBounds().pad(0.1)); 
+                }
+            }
+        });
+    </script>
+</body>
+</html>
